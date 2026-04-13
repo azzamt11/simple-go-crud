@@ -36,7 +36,7 @@ func main() {
 	// Use DB_URL from the environment so Docker can connect via the "db" service name.
 	dsn := os.Getenv("DB_URL")
 	if dsn == "" {
-		dsn = "root:password@tcp(127.0.0.1:3308)/gocrud_app"
+		dsn = "root:password@tcp(127.0.0.1:3310)/gocrud_app"
 	}
 
 	// 1. Connect to Database
