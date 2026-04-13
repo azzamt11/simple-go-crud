@@ -1,0 +1,135 @@
+{
+	"info": {
+		"name": "Go CRUD API",
+		"schema": "https://getpostman.com"
+	},
+	"item": [
+		{
+			"name": "Users",
+			"item": [
+				{
+					"name": "Get All Users",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": "http://localhost:8080/users"
+					}
+				},
+				{
+					"name": "Create User",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"John Doe\",\n    \"email\": \"john@example.com\"\n}"
+						},
+						"url": "http://localhost:8080/users"
+					}
+				},
+				{
+					"name": "Update User",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"id\": 1,\n    \"name\": \"John Updated\",\n    \"email\": \"john_new@example.com\"\n}"
+						},
+						"url": "http://localhost:8080/users/update"
+					}
+				},
+				{
+					"name": "Delete User",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8080/users/delete?id=1",
+							"query": [
+								{ "key": "id", "value": "1" }
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Posts",
+			"item": [
+				{
+					"name": "Get All Posts",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": "http://localhost:8080/posts"
+					}
+				},
+				{
+					"name": "Create Post or Comment",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"content\": \"Hello World!\",\n    \"user_id\": 1,\n    \"parent_post_id\": null\n}"
+						},
+						"url": "http://localhost:8080/posts"
+					}
+				},
+				{
+					"name": "Delete Post",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8080/posts/delete?id=1",
+							"query": [
+								{ "key": "id", "value": "1" }
+							]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "Likes",
+			"item": [
+				{
+					"name": "Like a Post",
+					"request": {
+						"method": "POST",
+						"header": [
+							{ "key": "Content-Type", "value": "application/json" }
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"post_id\": 1,\n    \"user_id\": 1\n}"
+						},
+						"url": "http://localhost:8080/likes"
+					}
+				},
+				{
+					"name": "Unlike a Post",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "http://localhost:8080/likes/delete?post_id=1&user_id=1",
+							"query": [
+								{ "key": "post_id", "value": "1" },
+								{ "key": "user_id", "value": "1" }
+							]
+						}
+					}
+				}
+			]
+		}
+	]
+}
