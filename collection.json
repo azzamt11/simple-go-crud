@@ -1,7 +1,7 @@
 {
 	"info": {
-		"name": "Go CRUD API",
-		"schema": "https://getpostman.com"
+		"name": "Go CRUD API v1",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
 	},
 	"item": [
 		{
@@ -12,7 +12,13 @@
 					"request": {
 						"method": "GET",
 						"header": [],
-						"url": "http://localhost:8080/users"
+						"url": {
+							"raw": "http://localhost:8080/users",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8080",
+							"path": ["users"]
+						}
 					}
 				},
 				{
@@ -26,7 +32,13 @@
 							"mode": "raw",
 							"raw": "{\n    \"name\": \"John Doe\",\n    \"email\": \"john@example.com\"\n}"
 						},
-						"url": "http://localhost:8080/users"
+						"url": {
+							"raw": "http://localhost:8080/users",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8080",
+							"path": ["users"]
+						}
 					}
 				},
 				{
@@ -40,16 +52,25 @@
 							"mode": "raw",
 							"raw": "{\n    \"id\": 1,\n    \"name\": \"John Updated\",\n    \"email\": \"john_new@example.com\"\n}"
 						},
-						"url": "http://localhost:8080/users/update"
+						"url": {
+							"raw": "http://localhost:8080/users/update",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8080",
+							"path": ["users", "update"]
+						}
 					}
 				},
 				{
 					"name": "Delete User",
 					"request": {
 						"method": "DELETE",
-						"header": [],
 						"url": {
 							"raw": "http://localhost:8080/users/delete?id=1",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8080",
+							"path": ["users", "delete"],
 							"query": [
 								{ "key": "id", "value": "1" }
 							]
@@ -65,12 +86,17 @@
 					"name": "Get All Posts",
 					"request": {
 						"method": "GET",
-						"header": [],
-						"url": "http://localhost:8080/posts"
+						"url": {
+							"raw": "http://localhost:8080/posts",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8080",
+							"path": ["posts"]
+						}
 					}
 				},
 				{
-					"name": "Create Post or Comment",
+					"name": "Create Post",
 					"request": {
 						"method": "POST",
 						"header": [
@@ -78,18 +104,27 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"content\": \"Hello World!\",\n    \"user_id\": 1,\n    \"parent_post_id\": null\n}"
+							"raw": "{\n    \"content\": \"Hello!\",\n    \"user_id\": 1,\n    \"parent_post_id\": null\n}"
 						},
-						"url": "http://localhost:8080/posts"
+						"url": {
+							"raw": "http://localhost:8080/posts",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8080",
+							"path": ["posts"]
+						}
 					}
 				},
 				{
 					"name": "Delete Post",
 					"request": {
 						"method": "DELETE",
-						"header": [],
 						"url": {
 							"raw": "http://localhost:8080/posts/delete?id=1",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8080",
+							"path": ["posts", "delete"],
 							"query": [
 								{ "key": "id", "value": "1" }
 							]
@@ -102,7 +137,7 @@
 			"name": "Likes",
 			"item": [
 				{
-					"name": "Like a Post",
+					"name": "Like Post",
 					"request": {
 						"method": "POST",
 						"header": [
@@ -112,16 +147,25 @@
 							"mode": "raw",
 							"raw": "{\n    \"post_id\": 1,\n    \"user_id\": 1\n}"
 						},
-						"url": "http://localhost:8080/likes"
+						"url": {
+							"raw": "http://localhost:8080/likes",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8080",
+							"path": ["likes"]
+						}
 					}
 				},
 				{
-					"name": "Unlike a Post",
+					"name": "Unlike Post",
 					"request": {
 						"method": "DELETE",
-						"header": [],
 						"url": {
 							"raw": "http://localhost:8080/likes/delete?post_id=1&user_id=1",
+							"protocol": "http",
+							"host": ["localhost"],
+							"port": "8080",
+							"path": ["likes", "delete"],
 							"query": [
 								{ "key": "post_id", "value": "1" },
 								{ "key": "user_id", "value": "1" }
