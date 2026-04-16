@@ -112,19 +112,44 @@ func deleteUser(w http.ResponseWriter, r *http.Request) {
 func handlePosts(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET": // Read All Posts (including total likes and author name)
-		query := `
-			SELECT 
-				p.id, 
-				p.content, 
-				p.parent_post_id, 
-				COUNT(l.post_id) as like_count,
-				u.name
-			FROM posts p 
-			LEFT JOIN post_likes l ON p.id = l.post_id 
-			LEFT JOIN users u ON p.user_id = u.id
-			GROUP BY p.id, u.name`
+		// 1. Extract the query parameter from the URL
+		parentPostIDStr := r.URL.Query().Get("parentPostId")
 
-		rows, err := db.Query(query)
+		var query string
+		var rows *sql.Rows
+		var err error
+
+		// 2. Adjust query based on whether parentPostId was provided or not
+		if parentPostIDStr != "" {
+			query = `
+				SELECT 
+					p.id, 
+					p.content, 
+					p.parent_post_id, 
+					COUNT(l.post_id) as like_count,
+					u.name
+				FROM posts p 
+				LEFT JOIN post_likes l ON p.id = l.post_id 
+				LEFT JOIN users u ON p.user_id = u.id
+				WHERE p.parent_post_id = ?
+				GROUP BY p.id, u.name`
+			rows, err = db.Query(query, parentPostIDStr)
+		} else {
+			query = `
+				SELECT 
+					p.id, 
+					p.content, 
+					p.parent_post_id, 
+					COUNT(l.post_id) as like_count,
+					u.name
+				FROM posts p 
+				LEFT JOIN post_likes l ON p.id = l.post_id 
+				LEFT JOIN users u ON p.user_id = u.id
+				WHERE p.parent_post_id IS NULL
+				GROUP BY p.id, u.name`
+			rows, err = db.Query(query)
+		}
+
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -134,7 +159,6 @@ func handlePosts(w http.ResponseWriter, r *http.Request) {
 		var posts []Post
 		for rows.Next() {
 			var p Post
-			// Added p.UserName to match the query scan order
 			err := rows.Scan(&p.ID, &p.Content, &p.ParentPostID, &p.LikeCount, &p.UserName)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -143,7 +167,6 @@ func handlePosts(w http.ResponseWriter, r *http.Request) {
 			posts = append(posts, p)
 		}
 
-		// Check for errors encountered during iteration
 		if err = rows.Err(); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -155,13 +178,14 @@ func handlePosts(w http.ResponseWriter, r *http.Request) {
 	case "POST": // Create Post or Comment
 		var p Post
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-			http.Error(w, "Invalid input", 400)
+			http.Error(w, "Invalid input", http.StatusBadRequest)
 			return
 		}
+
 		_, err := db.Exec("INSERT INTO posts(content, user_id, parent_post_id) VALUES(?, ?, ?)",
 			p.Content, p.UserID, p.ParentPostID)
 		if err != nil {
-			http.Error(w, err.Error(), 500)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
