@@ -21,6 +21,7 @@ type Post struct {
 	ID           int    `json:"id"`
 	Content      string `json:"content"`
 	UserID       int    `json:"user_id"`
+	UserName     string `json:"user_name"`      // Optional for convenience
 	ParentPostID *int   `json:"parent_post_id"` // Use pointer to allow null
 	LikeCount    int    `json:"like_count"`     // Added for convenience
 }
@@ -110,23 +111,45 @@ func deleteUser(w http.ResponseWriter, r *http.Request) {
 
 func handlePosts(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
-	case "GET": // Read All Posts (including total likes)
+	case "GET": // Read All Posts (including total likes and author name)
 		query := `
-			SELECT p.id, p.content, p.user_id, p.parent_post_id, COUNT(l.post_id) as like_count 
+			SELECT 
+				p.id, 
+				p.content, 
+				p.parent_post_id, 
+				COUNT(l.post_id) as like_count,
+				u.name
 			FROM posts p 
 			LEFT JOIN post_likes l ON p.id = l.post_id 
-			GROUP BY p.id`
+			LEFT JOIN users u ON p.user_id = u.id
+			GROUP BY p.id, u.name`
+
 		rows, err := db.Query(query)
 		if err != nil {
-			http.Error(w, err.Error(), 500)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		defer rows.Close() // Prevent connection leaks
+
 		var posts []Post
 		for rows.Next() {
 			var p Post
-			rows.Scan(&p.ID, &p.Content, &p.UserID, &p.ParentPostID, &p.LikeCount)
+			// Added p.UserName to match the query scan order
+			err := rows.Scan(&p.ID, &p.Content, &p.ParentPostID, &p.LikeCount, &p.UserName)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 			posts = append(posts, p)
 		}
+
+		// Check for errors encountered during iteration
+		if err = rows.Err(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(posts)
 
 	case "POST": // Create Post or Comment
