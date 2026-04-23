@@ -110,85 +110,104 @@ func deleteUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePosts(w http.ResponseWriter, r *http.Request) {
+	// 1. Enable CORS so Flutter can talk to your API
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
+	w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+
+	// Handle pre-flight OPTIONS request from Flutter
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	switch r.Method {
-	case "GET": // Read All Posts (including total likes and author name)
-		// 1. Extract the query parameter from the URL
+	case "GET":
 		parentPostIDStr := r.URL.Query().Get("parentPostId")
+		// Assume we want to know if User ID 1 liked these posts (replace with real auth later)
+		currentUserID := 1
 
 		var query string
 		var rows *sql.Rows
 		var err error
 
-		// 2. Adjust query based on whether parentPostId was provided or not
+		// This updated SQL query uses a subquery to check if 'currentUserID' liked the post
+		// Returning 1 for true, 0 for false as 'is_liked'
+		baseQuery := `
+			SELECT 
+				p.id, 
+				p.content, 
+				p.parent_post_id, 
+				p.user_id,
+				u.name as user_name,
+				COUNT(l.post_id) as like_count,
+				(SELECT COUNT(*) FROM post_likes WHERE post_id = p.id AND user_id = ?) as is_liked
+			FROM posts p 
+			LEFT JOIN post_likes l ON p.id = l.post_id 
+			LEFT JOIN users u ON p.user_id = u.id `
+
 		if parentPostIDStr != "" {
-			query = `
-				SELECT 
-					p.id, 
-					p.content, 
-					p.parent_post_id, 
-					COUNT(l.post_id) as like_count,
-					u.name
-				FROM posts p 
-				LEFT JOIN post_likes l ON p.id = l.post_id 
-				LEFT JOIN users u ON p.user_id = u.id
-				WHERE p.parent_post_id = ?
-				GROUP BY p.id, u.name`
-			rows, err = db.Query(query, parentPostIDStr)
+			query = baseQuery + "WHERE p.parent_post_id = ? GROUP BY p.id, u.name"
+			rows, err = db.Query(query, currentUserID, parentPostIDStr)
 		} else {
-			query = `
-				SELECT 
-					p.id, 
-					p.content, 
-					p.parent_post_id, 
-					COUNT(l.post_id) as like_count,
-					u.name
-				FROM posts p 
-				LEFT JOIN post_likes l ON p.id = l.post_id 
-				LEFT JOIN users u ON p.user_id = u.id
-				WHERE p.parent_post_id IS NULL
-				GROUP BY p.id, u.name`
-			rows, err = db.Query(query)
+			query = baseQuery + "WHERE p.parent_post_id IS NULL GROUP BY p.id, u.name"
+			rows, err = db.Query(query, currentUserID)
 		}
 
 		if err != nil {
+			log.Printf("Query error: %v", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		defer rows.Close() // Prevent connection leaks
+		defer rows.Close()
 
 		var posts []Post
 		for rows.Next() {
 			var p Post
-			err := rows.Scan(&p.ID, &p.Content, &p.ParentPostID, &p.LikeCount, &p.UserName)
+			var isLikedInt int
+			// Map the new SQL columns to your struct
+			err := rows.Scan(&p.ID, &p.Content, &p.ParentPostID, &p.UserID, &p.UserName, &p.LikeCount, &isLikedInt)
 			if err != nil {
+				log.Printf("Scan error: %v", err)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
+
+			// If you add an 'IsLiked bool' to your Go struct, you'd set it here:
+			// p.IsLiked = isLikedInt > 0
+
 			posts = append(posts, p)
 		}
 
-		if err = rows.Err(); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(posts)
 
-	case "POST": // Create Post or Comment
+	case "POST":
 		var p Post
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
 			http.Error(w, "Invalid input", http.StatusBadRequest)
 			return
 		}
 
-		_, err := db.Exec("INSERT INTO posts(content, user_id, parent_post_id) VALUES(?, ?, ?)",
+		// Basic validation
+		if p.Content == "" || p.UserID == 0 {
+			http.Error(w, "Content and UserID are required", http.StatusBadRequest)
+			return
+		}
+
+		result, err := db.Exec("INSERT INTO posts(content, user_id, parent_post_id) VALUES(?, ?, ?)",
 			p.Content, p.UserID, p.ParentPostID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		// Optional: Return the newly created ID
+		newID, _ := result.LastInsertId()
+		fmt.Printf("Created post ID: %d\n", newID)
+
 		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{"message": "Post created", "id": newID})
 	}
 }
 
