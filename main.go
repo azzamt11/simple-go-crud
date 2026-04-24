@@ -209,6 +209,16 @@ func handlePosts(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]interface{}{"message": "Post created", "id": newID})
 	}
+
+	case "PUT": // Update Post
+		var p Post
+		json.NewDecoder(r.Body).Decode(&p)
+		_, err := db.Exec("UPDATE posts SET content = ? WHERE id = ?", p.Content, p.ID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
 }
 
 func deletePost(w http.ResponseWriter, r *http.Request) {
