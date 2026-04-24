@@ -208,17 +208,42 @@ func handlePosts(w http.ResponseWriter, r *http.Request) {
 
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]interface{}{"message": "Post created", "id": newID})
-	}
 
 	case "PUT": // Update Post
 		var p Post
-		json.NewDecoder(r.Body).Decode(&p)
-		_, err := db.Exec("UPDATE posts SET content = ? WHERE id = ?", p.Content, p.ID)
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			http.Error(w, "Invalid input", http.StatusBadRequest)
+			return
+		}
+		if p.ID == 0 {
+			http.Error(w, "Post ID is required", http.StatusBadRequest)
+			return
+		}
+		if p.Content == "" {
+			http.Error(w, "Content is required", http.StatusBadRequest)
+			return
+		}
+
+		result, err := db.Exec("UPDATE posts SET content = ? WHERE id = ?", p.Content, p.ID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+		rowsAffected, err := result.RowsAffected()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if rowsAffected == 0 {
+			http.Error(w, "Post not found", http.StatusNotFound)
+			return
+		}
+
 		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"message": "Post updated"})
+
+	}
 }
 
 func deletePost(w http.ResponseWriter, r *http.Request) {
