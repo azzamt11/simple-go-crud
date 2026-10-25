@@ -3,13 +3,18 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	_ "embed"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 
-	_ "github.com/go-sql-driver/mysql"
+	_ "modernc.org/sqlite"
 )
+
+//go:embed schema.sql
+var schema string
 
 type User struct {
 	ID    int    `json:"id"`
@@ -34,21 +39,29 @@ type Like struct {
 var db *sql.DB
 
 func main() {
-	// Use DB_URL from the environment so Docker can connect via the "db" service name.
-	dsn := os.Getenv("DB_URL")
-	if dsn == "" {
-		dsn = "root:password@tcp(127.0.0.1:3310)/gocrud_app"
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "gocrud.db"
+	}
+	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
+		log.Fatal(err)
 	}
 
-	// 1. Connect to Database
 	var err error
-	db, err = sql.Open("mysql", dsn)
+	db, err = sql.Open("sqlite", "file:"+filepath.ToSlash(dbPath)+"?_pragma=foreign_keys(1)")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
 
-	// 2. Define Routes
+	if err := db.Ping(); err != nil {
+		log.Fatal(err)
+	}
+	if _, err := db.Exec(schema); err != nil {
+		log.Fatal(err)
+	}
+
+	// Define Routes
 	http.HandleFunc("/users", handleUsers)       // Create (POST) & Read (GET)
 	http.HandleFunc("/users/update", updateUser) // Update (PUT)
 	http.HandleFunc("/users/delete", deleteUser) // Delete (DELETE)
@@ -264,7 +277,7 @@ func handleLikes(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&l)
 
 	// Insert like (ignores if user already liked due to Primary Key)
-	_, err := db.Exec("INSERT IGNORE INTO post_likes(post_id, user_id) VALUES(?, ?)", l.PostID, l.UserID)
+	_, err := db.Exec("INSERT OR IGNORE INTO post_likes(post_id, user_id) VALUES(?, ?)", l.PostID, l.UserID)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
