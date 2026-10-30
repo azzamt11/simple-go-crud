@@ -141,12 +141,17 @@ func authMiddleware(next http.Handler) http.Handler {
 
 func optionalAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "" {
+		authHeaderPresent := r.Header.Get("Authorization") != ""
+		if authHeaderPresent {
 			if userID, err := parseTokenFromRequest(r); err == nil {
 				ctx := context.WithValue(r.Context(), userContextKey, userID)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
+			} else {
+				log.Printf("optional auth failed: method=%s path=%s error=%v", r.Method, r.URL.RequestURI(), err)
 			}
+		} else if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodDelete {
+			log.Printf("optional auth missing for mutation: method=%s path=%s", r.Method, r.URL.RequestURI())
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -398,19 +403,25 @@ func handlePosts(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(posts)
 
 	case http.MethodPost:
+		log.Printf("reply request received: method=%s path=%s remote=%s", r.Method, r.URL.RequestURI(), r.RemoteAddr)
 		currentUserID, ok := getUserIDFromContext(r.Context())
 		if !ok {
+			log.Printf("reply rejected: missing authenticated user")
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
+		log.Printf("reply authenticated: user_id=%d", currentUserID)
 
 		var p Post
 		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			log.Printf("reply decode failed: user_id=%d error=%v", currentUserID, err)
 			http.Error(w, "Invalid input", http.StatusBadRequest)
 			return
 		}
+		log.Printf("reply payload decoded: user_id=%d parent_post_id=%v content_length=%d", currentUserID, p.ParentPostID, len(p.Content))
 
 		if strings.TrimSpace(p.Content) == "" {
+			log.Printf("reply rejected: user_id=%d empty content", currentUserID)
 			http.Error(w, "Content is required", http.StatusBadRequest)
 			return
 		}
@@ -418,11 +429,18 @@ func handlePosts(w http.ResponseWriter, r *http.Request) {
 		result, err := db.Exec("INSERT INTO posts(content, user_id, parent_post_id) VALUES(?, ?, ?)",
 			p.Content, currentUserID, p.ParentPostID)
 		if err != nil {
+			log.Printf("reply insert failed: user_id=%d parent_post_id=%v error=%v", currentUserID, p.ParentPostID, err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
-		newID, _ := result.LastInsertId()
+		newID, err := result.LastInsertId()
+		if err != nil {
+			log.Printf("reply insert succeeded but reading id failed: user_id=%d error=%v", currentUserID, err)
+			http.Error(w, "Reply created but failed to read its id", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("reply created: id=%d user_id=%d parent_post_id=%v", newID, currentUserID, p.ParentPostID)
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]interface{}{"message": "Post created", "id": newID})
 
