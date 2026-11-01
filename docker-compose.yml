@@ -7,3 +7,13 @@ services:
       DB_PATH: /data/gocrud.db
     volumes:
       - ./data:/data
+      - ./storage:/storage
+
+  storage:
+    image: filebrowser/filebrowser:latest
+    ports:
+      - "127.0.0.1:8081:80"
+    volumes:
+      - ./storage:/srv
+      - ./filebrowser.db:/database/filebrowser.db
+    restart: unless-stopped
