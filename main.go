@@ -36,6 +36,7 @@ type User struct {
 	ID       int    `json:"id"`
 	Name     string `json:"name"`
 	Email    string `json:"email"`
+	Phone    string `json:"phone,omitempty"`
 	Password string `json:"password,omitempty"`
 }
 
@@ -86,6 +87,9 @@ func main() {
 	if _, err := db.Exec(schema); err != nil {
 		log.Fatal(err)
 	}
+	if err := ensurePhoneColumn(); err != nil {
+		log.Fatal(err)
+	}
 
 	mux := http.NewServeMux()
 
@@ -108,6 +112,21 @@ func main() {
 
 	fmt.Println("Server starting on :8080...")
 	log.Fatal(http.ListenAndServe(":8080", mux))
+}
+
+func ensurePhoneColumn() error {
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = 'phone'").Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		if _, err := db.Exec("ALTER TABLE users ADD COLUMN phone TEXT"); err != nil {
+			return err
+		}
+		_, err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users(phone) WHERE phone IS NOT NULL")
+		return err
+	}
+	return nil
 }
 
 // ----------------- Middleware -----------------
@@ -213,7 +232,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := db.Exec("INSERT INTO users(name, email, password_hash) VALUES(?, ?, ?)", req.Name, req.Email, string(hashedPassword))
+	res, err := db.Exec("INSERT INTO users(name, email, phone, password_hash) VALUES(?, ?, ?, ?)", req.Name, req.Email, nullablePhone(req.Phone), string(hashedPassword))
 	if err != nil {
 		http.Error(w, "Email might already be taken or DB error occurred", http.StatusBadRequest)
 		return
@@ -242,17 +261,24 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Email    string `json:"email"`
+		Phone    string `json:"phone"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Email == "" || req.Password == "" {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || (req.Email == "" && req.Phone == "") || req.Password == "" {
 		http.Error(w, "Email and password are required", http.StatusBadRequest)
 		return
 	}
 
 	var user User
 	var passwordHash string
-	err := db.QueryRow("SELECT id, name, email, password_hash FROM users WHERE email = ?", req.Email).
-		Scan(&user.ID, &user.Name, &user.Email, &passwordHash)
+	identifier := req.Email
+	query := "SELECT id, name, email, COALESCE(phone, ''), password_hash FROM users WHERE email = ?"
+	if req.Phone != "" {
+		identifier = req.Phone
+		query = "SELECT id, name, email, COALESCE(phone, ''), password_hash FROM users WHERE phone = ?"
+	}
+	err := db.QueryRow(query, identifier).
+		Scan(&user.ID, &user.Name, &user.Email, &user.Phone, &passwordHash)
 	if err != nil {
 		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
 		return
@@ -271,6 +297,14 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(AuthResponse{Token: token, User: user})
+}
+
+func nullablePhone(phone string) interface{} {
+	phone = strings.TrimSpace(phone)
+	if phone == "" {
+		return nil
+	}
+	return phone
 }
 
 func generateJWT(userID int, email string) (string, error) {
