@@ -129,6 +129,7 @@ func main() {
 
 	// Moment and file routes
 	mux.Handle("/moments", corsMiddleware(http.HandlerFunc(handleMoments)))
+	mux.Handle("/moments/home-display", corsMiddleware(http.HandlerFunc(handleHomeDisplayMoments)))
 	mux.Handle("/moment", corsMiddleware(http.HandlerFunc(handleMoment)))
 	mux.Handle("/moment/", corsMiddleware(http.HandlerFunc(handleMoment)))
 	mux.Handle("/file/upload", corsMiddleware(authMiddleware(http.HandlerFunc(handleFileUpload))))
@@ -677,6 +678,36 @@ func handleMoments(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		moments = append(moments, moment)
+	}
+	writeJSON(w, http.StatusOK, moments)
+}
+
+func handleHomeDisplayMoments(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	rows, err := db.Query(`SELECT id, title, description, image_urls, tag, home_display, user_id, created_at, updated_at
+		FROM moments WHERE home_display = 1 ORDER BY created_at DESC, id DESC`)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	moments := make([]Moment, 0)
+	for rows.Next() {
+		moment, err := scanMoment(rows)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		moments = append(moments, moment)
+	}
+	if err := rows.Err(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 	writeJSON(w, http.StatusOK, moments)
 }

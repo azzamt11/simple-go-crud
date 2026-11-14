@@ -28,7 +28,7 @@ if (-not [string]::IsNullOrWhiteSpace($portInput)) {
 }
 
 $arguments = @("-p", "$port")
-$arguments += @("-o", "StrictHostKeyChecking=ask")
+$arguments += @("-o", "StrictHostKeyChecking=accept-new")
 $keyPath = Read-Host "Private key path (leave blank to use default/agent/password auth)"
 if (-not [string]::IsNullOrWhiteSpace($keyPath)) {
     if (-not (Test-Path -LiteralPath $keyPath -PathType Leaf)) {
