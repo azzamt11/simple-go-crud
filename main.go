@@ -50,6 +50,7 @@ type AuthResponse struct {
 type Post struct {
 	ID           int    `json:"id"`
 	Content      string `json:"content"`
+	Type         string `json:"type"`
 	UserID       int    `json:"user_id"`
 	UserName     string `json:"user_name"`
 	ParentPostID *int   `json:"parent_post_id"`
@@ -104,6 +105,9 @@ func main() {
 	if err := ensurePhoneColumn(); err != nil {
 		log.Fatal(err)
 	}
+	if err := ensurePostTypeColumn(); err != nil {
+		log.Fatal(err)
+	}
 	if err := ensureMomentsTable(); err != nil {
 		log.Fatal(err)
 	}
@@ -140,6 +144,18 @@ func main() {
 
 	fmt.Println("Server starting on :8080...")
 	log.Fatal(http.ListenAndServe(":8080", mux))
+}
+
+func ensurePostTypeColumn() error {
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('posts') WHERE name = 'post_type'").Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		_, err := db.Exec("ALTER TABLE posts ADD COLUMN post_type TEXT NOT NULL DEFAULT 'text'")
+		return err
+	}
+	return nil
 }
 
 func ensureMomentsTable() error {
@@ -447,6 +463,7 @@ func handlePosts(w http.ResponseWriter, r *http.Request) {
 			SELECT 
 				p.id, 
 				p.content, 
+				p.post_type,
 				p.parent_post_id, 
 				p.user_id,
 				u.name as user_name,
@@ -478,7 +495,7 @@ func handlePosts(w http.ResponseWriter, r *http.Request) {
 		for rows.Next() {
 			var p Post
 			var isLikedInt int
-			err := rows.Scan(&p.ID, &p.Content, &p.ParentPostID, &p.UserID, &p.UserName, &p.LikeCount, &isLikedInt)
+			err := rows.Scan(&p.ID, &p.Content, &p.Type, &p.ParentPostID, &p.UserID, &p.UserName, &p.LikeCount, &isLikedInt)
 			if err != nil {
 				log.Printf("Scan error: %v", err)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -514,8 +531,11 @@ func handlePosts(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		result, err := db.Exec("INSERT INTO posts(content, user_id, parent_post_id) VALUES(?, ?, ?)",
-			p.Content, currentUserID, p.ParentPostID)
+		if strings.TrimSpace(p.Type) == "" {
+			p.Type = "text"
+		}
+		result, err := db.Exec("INSERT INTO posts(content, post_type, user_id, parent_post_id) VALUES(?, ?, ?, ?)",
+			p.Content, p.Type, currentUserID, p.ParentPostID)
 		if err != nil {
 			log.Printf("reply insert failed: user_id=%d parent_post_id=%v error=%v", currentUserID, p.ParentPostID, err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -548,9 +568,12 @@ func handlePosts(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Post ID and content are required", http.StatusBadRequest)
 			return
 		}
+		if strings.TrimSpace(p.Type) == "" {
+			p.Type = "text"
+		}
 
 		// Verify author ownership
-		result, err := db.Exec("UPDATE posts SET content = ? WHERE id = ? AND user_id = ?", p.Content, p.ID, currentUserID)
+		result, err := db.Exec("UPDATE posts SET content = ?, post_type = ? WHERE id = ? AND user_id = ?", p.Content, p.Type, p.ID, currentUserID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
