@@ -128,10 +128,10 @@ func main() {
 	mux.Handle("/likes/delete", corsMiddleware(authMiddleware(http.HandlerFunc(unlikePost))))
 
 	// Moment and file routes
-	mux.Handle("/moments", corsMiddleware(http.HandlerFunc(handleMoments)))
-	mux.Handle("/moments/home-display", corsMiddleware(http.HandlerFunc(handleHomeDisplayMoments)))
-	mux.Handle("/moment", corsMiddleware(http.HandlerFunc(handleMoment)))
-	mux.Handle("/moment/", corsMiddleware(http.HandlerFunc(handleMoment)))
+	mux.Handle("/moments", corsMiddleware(optionalAuthMiddleware(http.HandlerFunc(handleMoments))))
+	mux.Handle("/moments/home-display", corsMiddleware(optionalAuthMiddleware(http.HandlerFunc(handleHomeDisplayMoments))))
+	mux.Handle("/moment", corsMiddleware(optionalAuthMiddleware(http.HandlerFunc(handleMoment))))
+	mux.Handle("/moment/", corsMiddleware(optionalAuthMiddleware(http.HandlerFunc(handleMoment))))
 	mux.Handle("/file/upload", corsMiddleware(authMiddleware(http.HandlerFunc(handleFileUpload))))
 	mux.Handle("/files", corsMiddleware(http.HandlerFunc(handleFiles)))
 	mux.Handle("/files/edit/", corsMiddleware(authMiddleware(http.HandlerFunc(handleFileEdit))))
@@ -747,12 +747,16 @@ func handleMoment(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "title is required", http.StatusBadRequest)
 			return
 		}
-		userID, _ := getUserIDFromContext(r.Context())
+		userID, authenticated := getUserIDFromContext(r.Context())
+		var momentUserID any
+		if authenticated && userID > 0 {
+			momentUserID = userID
+		}
 		images, _ := json.Marshal(req.ImageURLs)
 		var result sql.Result
 		if r.Method == http.MethodPost {
 			result, err = db.Exec(`INSERT INTO moments(title, description, image_urls, tag, home_display, user_id, updated_at)
-				VALUES(?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, req.Title, req.Description, string(images), req.Tag, req.HomeDisplay, userID)
+				VALUES(?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, req.Title, req.Description, string(images), req.Tag, req.HomeDisplay, momentUserID)
 		} else {
 			result, err = db.Exec(`UPDATE moments SET title=?, description=?, image_urls=?, tag=?, home_display=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
 				req.Title, req.Description, string(images), req.Tag, req.HomeDisplay, id)
