@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS moments (
     description TEXT NOT NULL DEFAULT '',
     image_urls TEXT NOT NULL DEFAULT '[]',
     tag TEXT NOT NULL DEFAULT '',
+    home_display INTEGER NOT NULL DEFAULT 0,
     user_id INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

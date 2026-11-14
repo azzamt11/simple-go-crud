@@ -67,6 +67,7 @@ type Moment struct {
 	Description string   `json:"description"`
 	ImageURLs   []string `json:"imageUrls"`
 	Tag         string   `json:"tag"`
+	HomeDisplay bool     `json:"homeDisplay"`
 	UserID      *int     `json:"userId,omitempty"`
 	CreatedAt   string   `json:"createdAt"`
 	UpdatedAt   string   `json:"updatedAt"`
@@ -131,6 +132,9 @@ func main() {
 	mux.Handle("/moment", corsMiddleware(http.HandlerFunc(handleMoment)))
 	mux.Handle("/moment/", corsMiddleware(http.HandlerFunc(handleMoment)))
 	mux.Handle("/file/upload", corsMiddleware(authMiddleware(http.HandlerFunc(handleFileUpload))))
+	mux.Handle("/files", corsMiddleware(http.HandlerFunc(handleFiles)))
+	mux.Handle("/files/edit/", corsMiddleware(authMiddleware(http.HandlerFunc(handleFileEdit))))
+	mux.Handle("/files/delete/", corsMiddleware(authMiddleware(http.HandlerFunc(handleFileDelete))))
 	mux.Handle("/files/", corsMiddleware(http.HandlerFunc(handleFileDownload)))
 
 	fmt.Println("Server starting on :8080...")
@@ -144,11 +148,22 @@ func ensureMomentsTable() error {
 		description TEXT NOT NULL DEFAULT '',
 		image_urls TEXT NOT NULL DEFAULT '[]',
 		tag TEXT NOT NULL DEFAULT '',
+		home_display INTEGER NOT NULL DEFAULT 0,
 		user_id INTEGER,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 	)`)
+	if err != nil {
+		return err
+	}
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('moments') WHERE name = 'home_display'").Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		_, err = db.Exec("ALTER TABLE moments ADD COLUMN home_display INTEGER NOT NULL DEFAULT 0")
+	}
 	return err
 }
 
@@ -638,6 +653,7 @@ type momentRequest struct {
 	Description string   `json:"description"`
 	ImageURLs   []string `json:"imageUrls"`
 	Tag         string   `json:"tag"`
+	HomeDisplay bool     `json:"homeDisplay"`
 }
 
 func handleMoments(w http.ResponseWriter, r *http.Request) {
@@ -645,7 +661,7 @@ func handleMoments(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	rows, err := db.Query(`SELECT id, title, description, image_urls, tag, user_id, created_at, updated_at
+	rows, err := db.Query(`SELECT id, title, description, image_urls, tag, home_display, user_id, created_at, updated_at
 		FROM moments ORDER BY created_at DESC, id DESC`)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -704,11 +720,11 @@ func handleMoment(w http.ResponseWriter, r *http.Request) {
 		images, _ := json.Marshal(req.ImageURLs)
 		var result sql.Result
 		if r.Method == http.MethodPost {
-			result, err = db.Exec(`INSERT INTO moments(title, description, image_urls, tag, user_id, updated_at)
-				VALUES(?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, req.Title, req.Description, string(images), req.Tag, userID)
+			result, err = db.Exec(`INSERT INTO moments(title, description, image_urls, tag, home_display, user_id, updated_at)
+				VALUES(?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, req.Title, req.Description, string(images), req.Tag, req.HomeDisplay, userID)
 		} else {
-			result, err = db.Exec(`UPDATE moments SET title=?, description=?, image_urls=?, tag=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-				req.Title, req.Description, string(images), req.Tag, id)
+			result, err = db.Exec(`UPDATE moments SET title=?, description=?, image_urls=?, tag=?, home_display=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+				req.Title, req.Description, string(images), req.Tag, req.HomeDisplay, id)
 		}
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -753,7 +769,7 @@ func scanMoment(scanner momentScanner) (Moment, error) {
 	var m Moment
 	var imageJSON string
 	var userID sql.NullInt64
-	if err := scanner.Scan(&m.ID, &m.Title, &m.Description, &imageJSON, &m.Tag, &userID, &m.CreatedAt, &m.UpdatedAt); err != nil {
+	if err := scanner.Scan(&m.ID, &m.Title, &m.Description, &imageJSON, &m.Tag, &m.HomeDisplay, &userID, &m.CreatedAt, &m.UpdatedAt); err != nil {
 		return m, err
 	}
 	if userID.Valid {
@@ -767,7 +783,7 @@ func scanMoment(scanner momentScanner) (Moment, error) {
 }
 
 func getMoment(id int) (Moment, error) {
-	row := db.QueryRow(`SELECT id, title, description, image_urls, tag, user_id, created_at, updated_at FROM moments WHERE id=?`, id)
+	row := db.QueryRow(`SELECT id, title, description, image_urls, tag, home_display, user_id, created_at, updated_at FROM moments WHERE id=?`, id)
 	return scanMoment(row)
 }
 
@@ -822,12 +838,151 @@ func handleFileDownload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	filename := filepath.Base(strings.TrimPrefix(r.URL.Path, "/files/"))
-	if filename == "." || filename == "" {
+	filename, ok := fileNameFromPath(w, r, "/files/")
+	if !ok {
 		http.Error(w, "File not found", http.StatusNotFound)
 		return
 	}
-	http.ServeFile(w, r, filepath.Join("/storage", filename))
+	path := filepath.Join("/storage", filename)
+	if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+	http.ServeFile(w, r, path)
+}
+
+type FileInfo struct {
+	Filename    string    `json:"filename"`
+	URL         string    `json:"url"`
+	Size        int64     `json:"size"`
+	ContentType string    `json:"contentType"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+func handleFiles(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/files" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	entries, err := os.ReadDir("/storage")
+	if err != nil && !os.IsNotExist(err) {
+		http.Error(w, "Unable to list files", http.StatusInternalServerError)
+		return
+	}
+	files := make([]FileInfo, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, fileInfo(entry.Name(), info))
+	}
+	writeJSON(w, http.StatusOK, files)
+}
+
+func handleFileEdit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut && r.Method != http.MethodPost {
+		w.Header().Set("Allow", "PUT, POST")
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	filename, ok := fileNameFromPath(w, r, "/files/edit/")
+	if !ok {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+	destination := filepath.Join("/storage", filename)
+	if info, err := os.Stat(destination); err != nil || !info.Mode().IsRegular() {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 25<<20)
+	if err := r.ParseMultipartForm(25 << 20); err != nil {
+		http.Error(w, "File is required and must be smaller than 25 MB", http.StatusBadRequest)
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "file form field is required", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+	tmp, err := os.CreateTemp("/storage", ".upload-*")
+	if err != nil {
+		http.Error(w, "Unable to save file", http.StatusInternalServerError)
+		return
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if _, err := io.Copy(tmp, file); err != nil {
+		tmp.Close()
+		http.Error(w, "Unable to save file", http.StatusInternalServerError)
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		http.Error(w, "Unable to save file", http.StatusInternalServerError)
+		return
+	}
+	if err := os.Rename(tmpPath, destination); err != nil {
+		http.Error(w, "Unable to save file", http.StatusInternalServerError)
+		return
+	}
+	info, err := os.Stat(destination)
+	if err != nil {
+		http.Error(w, "Unable to read file information", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, fileInfo(filename, info))
+}
+
+func handleFileDelete(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		w.Header().Set("Allow", http.MethodDelete)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	filename, ok := fileNameFromPath(w, r, "/files/delete/")
+	if !ok {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+	path := filepath.Join("/storage", filename)
+	if info, err := os.Stat(path); err != nil || !info.Mode().IsRegular() {
+		http.Error(w, "File not found", http.StatusNotFound)
+		return
+	}
+	if err := os.Remove(path); err != nil {
+		http.Error(w, "Unable to delete file", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "File deleted", "filename": filename})
+}
+
+func fileNameFromPath(w http.ResponseWriter, r *http.Request, prefix string) (string, bool) {
+	name := strings.TrimPrefix(r.URL.Path, prefix)
+	if name == "" || name == r.URL.Path || name == "." || name == ".." || strings.ContainsAny(name, `/\\`) {
+		return "", false
+	}
+	if filepath.Base(name) != name {
+		return "", false
+	}
+	return name, true
+}
+
+func fileInfo(filename string, info os.FileInfo) FileInfo {
+	contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(filename)))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	return FileInfo{Filename: filename, URL: "/files/" + filename, Size: info.Size(), ContentType: contentType, UpdatedAt: info.ModTime()}
 }
 
 func writeJSON(w http.ResponseWriter, status int, value interface{}) {
