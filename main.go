@@ -119,6 +119,9 @@ func main() {
 	mux.HandleFunc("/login", handleLogin)
 
 	// User Routes
+	mux.Handle("/users/me", corsMiddleware(authMiddleware(http.HandlerFunc(getCurrentUser))))
+	mux.Handle("/users/name", corsMiddleware(authMiddleware(http.HandlerFunc(updateCurrentUserName))))
+	mux.Handle("/users/reset-password", corsMiddleware(authMiddleware(http.HandlerFunc(resetCurrentUserPassword))))
 	mux.Handle("/users", corsMiddleware(authMiddleware(http.HandlerFunc(handleUsers))))
 	mux.Handle("/users/update", corsMiddleware(authMiddleware(http.HandlerFunc(updateUser))))
 	mux.Handle("/users/delete", corsMiddleware(authMiddleware(http.HandlerFunc(deleteUser))))
@@ -391,6 +394,132 @@ func generateJWT(userID int, email string) (string, error) {
 }
 
 // ----------------- User Handlers -----------------
+
+func getCurrentUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", http.MethodGet)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, ok := getUserIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var user User
+	err := db.QueryRow("SELECT id, name, email, COALESCE(phone, '') FROM users WHERE id = ?", userID).
+		Scan(&user.ID, &user.Name, &user.Email, &user.Phone)
+	if errors.Is(err, sql.ErrNoRows) {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, "Unable to load profile", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
+}
+
+func updateCurrentUserName(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		w.Header().Set("Allow", http.MethodPut)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, ok := getUserIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		http.Error(w, "Name is required", http.StatusBadRequest)
+		return
+	}
+	if len(name) > 100 {
+		http.Error(w, "Name must be 100 characters or fewer", http.StatusBadRequest)
+		return
+	}
+	result, err := db.Exec("UPDATE users SET name = ? WHERE id = ?", name, userID)
+	if err != nil {
+		http.Error(w, "Unable to update name", http.StatusInternalServerError)
+		return
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
+	getUpdatedUser(w, userID)
+}
+
+func resetCurrentUserPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		w.Header().Set("Allow", http.MethodPut)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, ok := getUserIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	var req struct {
+		CurrentPassword string `json:"currentPassword"`
+		NewPassword     string `json:"newPassword"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+		return
+	}
+	if req.CurrentPassword == "" || len(req.NewPassword) < 4 {
+		http.Error(w, "Current password is required and new password must be at least 4 characters", http.StatusBadRequest)
+		return
+	}
+	if len([]byte(req.NewPassword)) > 72 {
+		http.Error(w, "New password must be 72 bytes or fewer", http.StatusBadRequest)
+		return
+	}
+	var passwordHash string
+	if err := db.QueryRow("SELECT password_hash FROM users WHERE id = ?", userID).Scan(&passwordHash); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "Unable to verify current password", http.StatusInternalServerError)
+		return
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(req.CurrentPassword)); err != nil {
+		http.Error(w, "Current password is incorrect", http.StatusUnauthorized)
+		return
+	}
+	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
+	if err != nil {
+		http.Error(w, "Unable to secure new password", http.StatusInternalServerError)
+		return
+	}
+	if _, err := db.Exec("UPDATE users SET password_hash = ? WHERE id = ?", string(newHash), userID); err != nil {
+		http.Error(w, "Unable to update password", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Password updated"})
+}
+
+func getUpdatedUser(w http.ResponseWriter, userID int) {
+	var user User
+	if err := db.QueryRow("SELECT id, name, email, COALESCE(phone, '') FROM users WHERE id = ?", userID).
+		Scan(&user.ID, &user.Name, &user.Email, &user.Phone); err != nil {
+		http.Error(w, "Profile updated but unable to load it", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
+}
 
 func handleUsers(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
