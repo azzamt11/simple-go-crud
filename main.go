@@ -457,6 +457,7 @@ func handlePosts(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		parentPostIDStr := r.URL.Query().Get("parentPostId")
+		postType := strings.TrimSpace(r.URL.Query().Get("type"))
 		currentUserID, _ := getUserIDFromContext(r.Context()) // 0 if not logged in
 
 		baseQuery := `
@@ -475,14 +476,20 @@ func handlePosts(w http.ResponseWriter, r *http.Request) {
 
 		var rows *sql.Rows
 		var err error
-
+		filters := make([]string, 0, 2)
+		args := []any{currentUserID}
 		if parentPostIDStr != "" {
-			query := baseQuery + "WHERE p.parent_post_id = ? GROUP BY p.id, u.name ORDER BY p.created_at DESC"
-			rows, err = db.Query(query, currentUserID, parentPostIDStr)
+			filters = append(filters, "p.parent_post_id = ?")
+			args = append(args, parentPostIDStr)
 		} else {
-			query := baseQuery + "WHERE p.parent_post_id IS NULL GROUP BY p.id, u.name ORDER BY p.created_at DESC"
-			rows, err = db.Query(query, currentUserID)
+			filters = append(filters, "p.parent_post_id IS NULL")
 		}
+		if postType != "" {
+			filters = append(filters, "p.post_type = ?")
+			args = append(args, postType)
+		}
+		query := baseQuery + "WHERE " + strings.Join(filters, " AND ") + " GROUP BY p.id, u.name ORDER BY p.created_at DESC"
+		rows, err = db.Query(query, args...)
 
 		if err != nil {
 			log.Printf("Query error: %v", err)
