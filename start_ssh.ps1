@@ -46,9 +46,7 @@ if ([string]::IsNullOrWhiteSpace($hostName) -or [string]::IsNullOrWhiteSpace($us
 
 $arguments = @(
     "-p", "$port",
-    "-o", "StrictHostKeyChecking=accept-new",
-    "-o", "BatchMode=yes",
-    "-o", "PreferredAuthentications=publickey"
+    "-o", "StrictHostKeyChecking=accept-new"
 )
 $keyPath = $envValues["SSH_KEY_PATH"]
 if (-not [string]::IsNullOrWhiteSpace($keyPath)) {
