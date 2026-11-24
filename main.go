@@ -128,6 +128,7 @@ func main() {
 
 	// Post Routes (Optional auth for GET so guest users can view posts, required auth for mutations)
 	mux.Handle("/posts", corsMiddleware(optionalAuthMiddleware(http.HandlerFunc(handlePosts))))
+	mux.Handle("/posts/latest", corsMiddleware(optionalAuthMiddleware(http.HandlerFunc(handleLatestPost))))
 	mux.Handle("/posts/delete", corsMiddleware(authMiddleware(http.HandlerFunc(deletePost))))
 
 	// Like Routes (Protected)
@@ -579,6 +580,49 @@ func deleteUser(w http.ResponseWriter, r *http.Request) {
 }
 
 // ----------------- Post Handlers -----------------
+
+// handleLatestPost returns the newest top-level post matching the optional type
+// filter when its ID differs from latestId. An empty JSON array means unchanged.
+func handleLatestPost(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	latestID, err := strconv.Atoi(r.URL.Query().Get("latestId"))
+	if err != nil || latestID < 0 {
+		http.Error(w, "latestId must be a non-negative integer", http.StatusBadRequest)
+		return
+	}
+	postType := strings.TrimSpace(r.URL.Query().Get("type"))
+	currentUserID, _ := getUserIDFromContext(r.Context())
+	query := `SELECT p.id, p.content, p.post_type, p.parent_post_id, p.user_id,
+		u.name, (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id),
+		(SELECT COUNT(*) FROM post_likes WHERE post_id = p.id AND user_id = ?)
+		FROM posts p LEFT JOIN users u ON p.user_id = u.id
+		WHERE p.parent_post_id IS NULL`
+	args := []any{currentUserID}
+	if postType != "" {
+		query += " AND p.post_type = ?"
+		args = append(args, postType)
+	}
+	query += " ORDER BY p.id DESC LIMIT 1"
+
+	var p Post
+	var isLiked int
+	err = db.QueryRow(query, args...).Scan(&p.ID, &p.Content, &p.Type, &p.ParentPostID, &p.UserID, &p.UserName, &p.LikeCount, &isLiked)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && p.ID == latestID) {
+		json.NewEncoder(w).Encode([]Post{})
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	p.IsLiked = isLiked > 0
+	json.NewEncoder(w).Encode([]Post{p})
+}
 
 func handlePosts(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
